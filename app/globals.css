@@ -45,7 +45,7 @@ body {
   overflow-x: clip;
 }
 
-@media (display-mode: standalone) and (pointer: coarse) {
+@media (display-mode: standalone) {
   html,
   body {
     overscroll-behavior-y: none;
