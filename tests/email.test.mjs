@@ -2,19 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import { test, after } from "node:test";
-import { getEmailConfig, getResend, sendEmail } from "../lib/resend.ts";
+import { getEmailConfig, sendEmail, publishNewsletter } from "../lib/brevo.ts";
 
-const originalFetch = globalThis.fetch;
-const originalWarn = console.warn;
-const originalError = console.error;
-console.warn = () => {};
-console.error = () => {};
-const originalEnv = { ...process.env };
-after(() => { globalThis.fetch = originalFetch; process.env = originalEnv; console.warn = originalWarn; console.error = originalError; });
-process.env.RESEND_API_KEY = "re_test_only";
-process.env.RESEND_NEWSLETTER_SEGMENT_ID = "segment-test";
-process.env.NODE_ENV = "production";
-delete process.env.RESEND_FROM_EMAIL;
+const previous = { fetch: globalThis.fetch, env: { ...process.env }, warn: console.warn, error: console.error };
+after(() => { globalThis.fetch = previous.fetch; process.env = previous.env; console.warn = previous.warn; console.error = previous.error; });
+console.warn = console.error = () => {};
+process.env.BREVO_API_KEY = "test-key";
+process.env.BREVO_FROM_EMAIL = "mail@stackorcs.com";
+process.env.BREVO_NEWSLETTER_LIST_ID = "7";
 
 async function route(path) {
   const source = stripTypeScriptTypes(await readFile(new URL(path, import.meta.url), "utf8"))
@@ -26,103 +21,72 @@ const contact = await route("../app/api/contact/route.ts");
 const newsletter = await route("../app/api/newsletter/route.ts");
 let requestId = 0;
 function request(path, body) {
-  return new Request("https://stackorcs.com/api/" + path, {
-    method: "POST",
+  return new Request("https://stackorcs.com/api/" + path, { method: "POST",
     headers: { origin: "https://stackorcs.com", host: "stackorcs.com", "content-type": "application/json", "x-real-ip": String(++requestId) },
-    body: JSON.stringify(body),
-  });
+    body: JSON.stringify(body) });
 }
-function response(data, status = 200) { return Response.json(data, { status }); }
-const invalidKey = { name: "invalid_api_key", statusCode: 401, message: "Invalid API key" };
-const missing = { name: "not_found", statusCode: 404, message: "Contact not found" };
+const brief = { name: "Test", email: "reader@example.com", challenge: "A project brief with sufficient context." };
+const denied = () => Response.json({ code: "unauthorized", message: "Invalid API key" }, { status: 401 });
 
-test("verified domain overrides and recipient overrides survive", () => {
-  process.env.RESEND_FROM_EMAIL = "StackOrcs <mail@stackorcs.com>";
-  process.env.RESEND_REPLY_TO = "hello@stackorcs.com";
-  process.env.CONTACT_RECIPIENT = "inbox@stackorcs.com";
-  assert.deepEqual(getEmailConfig(), { from: process.env.RESEND_FROM_EMAIL, replyTo: process.env.RESEND_REPLY_TO, recipient: process.env.CONTACT_RECIPIENT });
-  delete process.env.RESEND_FROM_EMAIL;
-  assert.equal(getEmailConfig().from, "StackOrcs <updates@stackorcs.com>");
+test("Brevo receives the configured sender, recipient, reply-to and server-only key", async () => {
+  let sent;
+  globalThis.fetch = async (url, options) => { sent = { url, options }; return Response.json({ messageId: "accepted" }, { status: 201 }); };
+  const { from, replyTo } = getEmailConfig();
+  await sendEmail({ from, to: [brief.email], replyTo, subject: "Test", html: "Hello" });
+  assert.equal(sent.url, "https://api.brevo.com/v3/smtp/email");
+  assert.equal(sent.options.headers["api-key"], "test-key");
+  assert.ok(sent.options.signal instanceof AbortSignal);
+  assert.deepEqual(JSON.parse(sent.options.body), { sender: from, to: [{ email: brief.email }], replyTo: { email: replyTo }, subject: "Test", htmlContent: "Hello" });
+  delete process.env.BREVO_API_KEY;
+  await assert.rejects(sendEmail({ from, to: [brief.email], replyTo, subject: "Test", html: "Hello" }), /BREVO_API_KEY/);
+  process.env.BREVO_API_KEY = "test-key";
 });
 
-test("test-only sender and missing credentials fail explicitly", () => {
-  process.env.RESEND_FROM_EMAIL = "StackOrcs <onboarding@resend.dev>";
-  assert.throws(getEmailConfig, /verified domain/);
-  delete process.env.RESEND_FROM_EMAIL;
-  delete process.env.RESEND_API_KEY;
-  assert.throws(getResend, /RESEND_API_KEY/);
-  process.env.RESEND_API_KEY = "re_test_only";
-});
-
-test("temporary rate limit retries with the same idempotency key and a timeout", async () => {
-  const attempts = [];
-  globalThis.fetch = async (_url, options) => {
-    attempts.push(options);
-    return attempts.length === 1
-      ? response({ name: "rate_limit_exceeded", statusCode: 429, message: "Slow down" }, 429)
-      : response({ id: "email-id" });
-  };
-  assert.deepEqual(await sendEmail(getResend(), { from: "updates@stackorcs.com", to: "reader@example.com", subject: "Test", html: "Hello" }), { id: "email-id" });
-  assert.equal(attempts.length, 2);
-  assert.ok(attempts[0].headers.get("Idempotency-Key"));
-  assert.equal(attempts[0].headers.get("Idempotency-Key"), attempts[1].headers.get("Idempotency-Key"));
-  assert.ok(attempts.every(options => options.signal instanceof AbortSignal));
-});
-
-test("invalid API key fails once instead of retrying or sending an acknowledgement", async () => {
+test("a rejected owner email fails the contact request without sending a confirmation", async () => {
   let calls = 0;
-  globalThis.fetch = async () => { calls++; return response(invalidKey, 401); };
-  const result = await contact(request("contact", { name: "Test", email: "reader@example.com", challenge: "A project brief with sufficient context." }));
-  assert.equal(result.status, 503);
+  globalThis.fetch = async () => { calls++; return denied(); };
+  assert.equal((await contact(request("contact", brief))).status, 503);
   assert.equal(calls, 1);
 });
 
-test("owner delivery survives a failed acknowledgement", async () => {
-  let calls = 0;
-  globalThis.fetch = async () => ++calls === 1 ? response({ id: "owner-email" }) : response(invalidKey, 401);
-  const result = await contact(request("contact", { name: "Test", email: "reader@example.com", challenge: "A project brief with sufficient context." }));
-  assert.equal(result.status, 200);
-  assert.deepEqual(await result.json(), { ok: true, confirmationSent: false });
+test("a failed subscriber save does not send mail or report success", async () => {
+  const calls = [];
+  globalThis.fetch = async (url) => { calls.push(url); return denied(); };
+  assert.equal((await newsletter(request("newsletter", { email: brief.email }))).status, 503);
+  assert.deepEqual(calls, ["https://api.brevo.com/v3/contacts"]);
 });
 
-test("a failed contact save never reports a successful subscription or sends emails", async () => {
+test("existing contacts can subscribe again, and failed notifications retain the saved signup", async () => {
   const calls = [];
   globalThis.fetch = async (url, options) => {
-    calls.push([url, options.method]);
-    return options.method === "GET" ? response(missing, 404) : response(invalidKey, 401);
+    calls.push({ url, body: JSON.parse(options.body) });
+    return url.endsWith("/contacts") ? new Response(null, { status: 204 }) : denied();
   };
-  const result = await newsletter(request("newsletter", { email: "reader@example.com" }));
-  assert.equal(result.status, 503);
-  assert.equal(calls.length, 2);
-  assert.ok(calls.every(([url]) => !url.endsWith("/emails")));
+  const result = await newsletter(request("newsletter", { email: brief.email, firstName: "Test" }));
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), { ok: true, welcomeSent: false });
+  assert.deepEqual(calls[0].body, { email: brief.email, attributes: { FIRSTNAME: "Test" }, listIds: [7], updateEnabled: true, emailBlacklisted: false });
+  assert.ok(calls.slice(1).every(call => call.url.endsWith("/smtp/email")));
 });
 
-test("a saved subscriber stays subscribed when notifications fail", async () => {
-  const calls = [];
-  globalThis.fetch = async (url, options) => {
-    calls.push([url, options.method]);
-    if (options.method === "GET") return response(missing, 404);
-    if (url.endsWith("/contacts")) return response({ id: "saved-contact" });
-    return response(invalidKey, 401);
-  };
-  const result = await newsletter(request("newsletter", { email: "reader@example.com" }));
-  assert.equal(result.status, 200);
-  assert.deepEqual(await result.json(), { ok: true, existing: false, welcomeSent: false });
-  assert.ok(calls[1][0].endsWith("/contacts"));
-  assert.ok(calls.slice(2).every(([url]) => url.endsWith("/emails")));
+test("missing list configuration fails before making a provider request", async () => {
+  delete process.env.BREVO_NEWSLETTER_LIST_ID;
+  globalThis.fetch = async () => { assert.fail("Provider must not be called"); };
+  assert.equal((await newsletter(request("newsletter", { email: brief.email }))).status, 503);
+  process.env.BREVO_NEWSLETTER_LIST_ID = "7";
 });
 
-test("existing subscribers are restored to the segment before notification", async () => {
+test("campaigns stay drafts by default and only queue delivery when explicitly requested", async () => {
   const calls = [];
   globalThis.fetch = async (url, options) => {
-    calls.push([url, options.method, options.body && JSON.parse(options.body)]);
-    return response({ id: "existing-contact", email: "reader@example.com", unsubscribed: true });
+    calls.push({ url, body: options.body && JSON.parse(options.body) });
+    return url.endsWith("/sendNow") ? new Response(null, { status: 204 }) : Response.json({ id: 42 }, { status: 201 });
   };
-  const result = await newsletter(request("newsletter", { email: "reader@example.com" }));
-  assert.equal(result.status, 200);
-  assert.equal((await result.json()).existing, true);
-  assert.equal(calls[1][1], "PATCH");
-  assert.equal(calls[1][2].unsubscribed, false);
-  assert.ok(calls[2][0].includes("/segments/"));
-  assert.ok(calls.slice(3).every(([url]) => url.endsWith("/emails")));
+  const input = { title: "Field Note", html: '<a href="{{ unsubscribe }}">Unsubscribe</a>', send: false };
+  assert.equal(await publishNewsletter(input), 42);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].body.recipients, { listIds: [7] });
+  assert.equal(calls[0].body.htmlContent, input.html);
+  assert.equal(await publishNewsletter({ ...input, send: true }), 42);
+  assert.equal(calls[2].url, "https://api.brevo.com/v3/emailCampaigns/42/sendNow");
 });

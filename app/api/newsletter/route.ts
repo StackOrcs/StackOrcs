@@ -10,13 +10,7 @@ import {
   rateLimit,
   validEmail,
 } from "@/lib/request-guard";
-import {
-  getEmailConfig,
-  getNewsletterSegmentId,
-  getResend,
-  resendRequest,
-  sendEmail,
-} from "@/lib/resend";
+import { getEmailConfig, sendEmail, subscribeNewsletter } from "@/lib/brevo";
 
 export async function POST(request: Request) {
   if (!isAllowedOrigin(request)) {
@@ -33,42 +27,18 @@ export async function POST(request: Request) {
     if (!validEmail(email)) {
       return NextResponse.json({ message: "Enter a valid work email." }, { status: 400 });
     }
-    const resend = getResend();
     const { from, replyTo, recipient } = getEmailConfig();
-    // A signup succeeds only after the contact is saved in the mailing list.
-    const segmentId = await getNewsletterSegmentId(resend);
-    let existing = false;
-    try {
-      await resendRequest(() => resend.contacts.get({ email }));
-      existing = true;
-    } catch (error) {
-      if (!(error instanceof Error) || error.name !== "not_found") throw error;
-    }
-    if (existing) {
-      await resendRequest(() => resend.contacts.update({
-        email,
-        firstName: firstName || undefined,
-        unsubscribed: false,
-      }));
-      await resendRequest(() => resend.contacts.segments.add({ email, segmentId }));
-    } else {
-      await resendRequest(() => resend.contacts.create({
-        email,
-        firstName: firstName || undefined,
-        unsubscribed: false,
-        segments: [{ id: segmentId }],
-      }));
-    }
+    await subscribeNewsletter(email, firstName);
 
     const [ownerDelivery, welcomeDelivery] = await Promise.allSettled([
-      sendEmail(resend, {
+      sendEmail({
         from,
         to: [recipient],
         replyTo: email,
         subject: firstName ? "New Field Notes subscriber — " + firstName : "New Field Notes subscriber",
         html: newsletterOwnerEmail(email, firstName),
       }),
-      sendEmail(resend, {
+      sendEmail({
         from,
         to: [email],
         replyTo,
@@ -85,7 +55,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      existing,
       welcomeSent: welcomeDelivery.status === "fulfilled",
     });
   } catch (error) {

@@ -23,11 +23,9 @@ export function NewsletterPanel() {
       form.reset();
       setStatus("success");
       setMessage(
-        result.existing
-          ? "You are already on the Field Notes list."
-          : result.welcomeSent
-            ? "You are in. Check your inbox for the welcome note."
-            : "You are in. You are on the Field Notes list.",
+        result.welcomeSent
+          ? "You are in. Check your inbox for the welcome note."
+          : "You are in. You are on the Field Notes list.",
       );
     } catch (error) {
       setStatus("error");

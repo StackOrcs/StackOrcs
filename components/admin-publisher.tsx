@@ -35,9 +35,9 @@ export function AdminPublisher() {
       if (!response.ok) throw new Error(result.message || "Publishing failed.");
       setStatus("success");
       setMessage(
-        result.mode === "sent"
-          ? "Broadcast sent to the Field Notes segment."
-          : "Broadcast draft created in Resend for final review.",
+        result.mode === "queued"
+          ? "Broadcast queued for the Field Notes list."
+          : "Broadcast draft created in Brevo for final review.",
       );
       form.reset();
     } catch (error) {
@@ -85,7 +85,7 @@ export function AdminPublisher() {
         <input name="send" type="checkbox" />
         <span>
           <strong>Send immediately</strong>
-          Leave off to create a reviewable draft in Resend.
+          Leave off to create a reviewable draft in Brevo.
         </span>
       </label>
       <button className="button-link" type="submit" disabled={status === "sending"}>

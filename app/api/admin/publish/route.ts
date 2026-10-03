@@ -2,11 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { broadcastEmail } from "@/lib/email-templates";
 import { cleanText, rateLimit } from "@/lib/request-guard";
-import {
-  getEmailConfig,
-  getNewsletterSegmentId,
-  getResend,
-} from "@/lib/resend";
+import { publishNewsletter } from "@/lib/brevo";
 
 function authorized(request: Request) {
   const supplied = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
@@ -41,33 +37,15 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const { from } = getEmailConfig();
-    const resend = getResend();
-    const segmentId = await getNewsletterSegmentId(resend);
-    const broadcast = {
-      segmentId,
-      from,
-      name: "Field Note — " + title,
-      subject: title,
+    const broadcastId = await publishNewsletter({
+      title,
       html: broadcastEmail({ title, excerpt, url, category }),
-      text:
-        category +
-        ": " +
-        title +
-        "\n\n" +
-        excerpt +
-        "\n\nRead: " +
-        url +
-        "\n\nUnsubscribe: {{{RESEND_UNSUBSCRIBE_URL}}}",
-    };
-    const { data, error } = send
-      ? await resend.broadcasts.create({ ...broadcast, send: true })
-      : await resend.broadcasts.create({ ...broadcast, send: false });
-    if (error) throw new Error(error.message);
+      send,
+    });
     return NextResponse.json({
       ok: true,
-      broadcastId: data?.id,
-      mode: send ? "sent" : "draft",
+      broadcastId,
+      mode: send ? "queued" : "draft",
     });
   } catch (error) {
     console.error("Broadcast publishing failed", error);

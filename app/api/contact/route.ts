@@ -10,7 +10,7 @@ import {
   rateLimit,
   validEmail,
 } from "@/lib/request-guard";
-import { getEmailConfig, getResend, sendEmail } from "@/lib/resend";
+import { getEmailConfig, sendEmail } from "@/lib/brevo";
 
 export async function POST(request: Request) {
   if (!isAllowedOrigin(request)) {
@@ -39,9 +39,8 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const resend = getResend();
     const { from, replyTo, recipient } = getEmailConfig();
-    await sendEmail(resend, {
+    await sendEmail({
       from,
       to: [recipient],
       replyTo: input.email,
@@ -50,7 +49,7 @@ export async function POST(request: Request) {
     });
     let confirmationSent = false;
     try {
-      await sendEmail(resend, {
+      await sendEmail({
         from,
         to: [input.email],
         replyTo,

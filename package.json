@@ -13,8 +13,7 @@
     "motion": "13.1.0",
     "next": "16.3.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "resend": "6.19.0"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@types/node": "26.2.0",
