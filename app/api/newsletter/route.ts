@@ -14,6 +14,8 @@ import {
   getEmailConfig,
   getNewsletterSegmentId,
   getResend,
+  resendRequest,
+  sendEmail,
 } from "@/lib/resend";
 
 export async function POST(request: Request) {
@@ -33,15 +35,40 @@ export async function POST(request: Request) {
     }
     const resend = getResend();
     const { from, replyTo, recipient } = getEmailConfig();
-    const [ownerDelivery, welcomeDelivery] = await Promise.all([
-      resend.emails.send({
+    // A signup succeeds only after the contact is saved in the mailing list.
+    const segmentId = await getNewsletterSegmentId(resend);
+    let existing = false;
+    try {
+      await resendRequest(() => resend.contacts.get({ email }));
+      existing = true;
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== "not_found") throw error;
+    }
+    if (existing) {
+      await resendRequest(() => resend.contacts.update({
+        email,
+        firstName: firstName || undefined,
+        unsubscribed: false,
+      }));
+      await resendRequest(() => resend.contacts.segments.add({ email, segmentId }));
+    } else {
+      await resendRequest(() => resend.contacts.create({
+        email,
+        firstName: firstName || undefined,
+        unsubscribed: false,
+        segments: [{ id: segmentId }],
+      }));
+    }
+
+    const [ownerDelivery, welcomeDelivery] = await Promise.allSettled([
+      sendEmail(resend, {
         from,
         to: [recipient],
         replyTo: email,
-        subject: `New Field Notes subscriber${firstName ? ` — ${firstName}` : ""}`,
+        subject: firstName ? "New Field Notes subscriber — " + firstName : "New Field Notes subscriber",
         html: newsletterOwnerEmail(email, firstName),
       }),
-      resend.emails.send({
+      sendEmail(resend, {
         from,
         to: [email],
         replyTo,
@@ -49,33 +76,17 @@ export async function POST(request: Request) {
         html: newsletterWelcomeEmail(firstName),
       }),
     ]);
-    if (ownerDelivery.error) throw new Error(ownerDelivery.error.message);
-    if (welcomeDelivery.error) {
-      console.warn("Newsletter welcome delivery skipped", welcomeDelivery.error.message);
+    if (ownerDelivery.status === "rejected") {
+      console.warn("Newsletter owner notification failed", ownerDelivery.reason);
     }
-
-    let existing = false;
-    try {
-      const segmentId = await getNewsletterSegmentId(resend);
-      const created = await resend.contacts.create({
-        email,
-        firstName: firstName || undefined,
-        unsubscribed: false,
-        segments: [{ id: segmentId }],
-      });
-      if (created.error) {
-        existing = true;
-        const added = await resend.contacts.segments.add({ email, segmentId });
-        if (added.error) console.warn("Newsletter contact sync skipped", added.error.message);
-      }
-    } catch (syncError) {
-      console.warn("Newsletter contact sync skipped", syncError);
+    if (welcomeDelivery.status === "rejected") {
+      console.warn("Newsletter welcome delivery failed", welcomeDelivery.reason);
     }
 
     return NextResponse.json({
       ok: true,
       existing,
-      welcomeSent: !welcomeDelivery.error,
+      welcomeSent: welcomeDelivery.status === "fulfilled",
     });
   } catch (error) {
     console.error("Newsletter subscription failed", error);
