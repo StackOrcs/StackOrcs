@@ -87,7 +87,7 @@ export default function PrivacyPage() {
               <p>
                 StackOrcs does not sell personal data and does not disclose it
                 for third-party advertising. Vercel provides website hosting and
-                delivery infrastructure. Resend provides transactional and
+                delivery infrastructure. Brevo provides transactional and
                 subscription email delivery. Authorized professional advisers
                 or authorities receive information only when necessary for a
                 defined service, legal obligation, or protection of rights.

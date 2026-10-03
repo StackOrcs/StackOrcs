@@ -5,15 +5,15 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",
     "motion": "13.1.0",
     "next": "16.3.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "resend": "6.19.0"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@types/node": "26.2.0",

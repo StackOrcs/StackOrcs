@@ -3,6 +3,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { CookieNotice } from "@/components/cookie-notice";
 import { PointerGlow } from "@/components/pointer-glow";
+import { PwaRefreshGuard } from "@/components/pwa-refresh-guard";
 import "./globals.css";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://stackorcs.com";
@@ -81,6 +82,7 @@ export default function RootLayout({
       }}
     >
       <body>
+        <PwaRefreshGuard />
         <a className="skip-link" href="#main-content">
           Skip to content
         </a>

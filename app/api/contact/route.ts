@@ -10,7 +10,7 @@ import {
   rateLimit,
   validEmail,
 } from "@/lib/request-guard";
-import { getEmailConfig, getResend } from "@/lib/resend";
+import { getEmailConfig, sendEmail } from "@/lib/brevo";
 
 export async function POST(request: Request) {
   if (!isAllowedOrigin(request)) {
@@ -39,29 +39,28 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const resend = getResend();
     const { from, replyTo, recipient } = getEmailConfig();
-    const [ownerDelivery, confirmationDelivery] = await Promise.all([
-      resend.emails.send({
-        from,
-        to: [recipient],
-        replyTo: input.email,
-        subject: `Project signal — ${input.name}${input.company ? ` / ${input.company}` : ""}`,
-        html: inquiryOwnerEmail(input),
-      }),
-      resend.emails.send({
+    await sendEmail({
+      from,
+      to: [recipient],
+      replyTo: input.email,
+      subject: `Project signal — ${input.name}${input.company ? ` / ${input.company}` : ""}`,
+      html: inquiryOwnerEmail(input),
+    });
+    let confirmationSent = false;
+    try {
+      await sendEmail({
         from,
         to: [input.email],
         replyTo,
         subject: "Your StackOrcs project brief is in",
         html: inquiryConfirmationEmail(input.name),
-      }),
-    ]);
-    if (ownerDelivery.error) throw new Error(ownerDelivery.error.message);
-    if (confirmationDelivery.error) {
-      console.warn("Contact confirmation delivery skipped", confirmationDelivery.error.message);
+      });
+      confirmationSent = true;
+    } catch (error) {
+      console.warn("Contact confirmation delivery failed", error);
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, confirmationSent });
   } catch (error) {
     console.error("Contact delivery failed", error);
     return NextResponse.json(

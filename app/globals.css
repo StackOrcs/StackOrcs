@@ -45,6 +45,13 @@ body {
   overflow-x: clip;
 }
 
+@media (display-mode: standalone) {
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+}
+
 button,
 a,
 input,

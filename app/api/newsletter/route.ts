@@ -10,11 +10,7 @@ import {
   rateLimit,
   validEmail,
 } from "@/lib/request-guard";
-import {
-  getEmailConfig,
-  getNewsletterSegmentId,
-  getResend,
-} from "@/lib/resend";
+import { getEmailConfig, sendEmail, subscribeNewsletter } from "@/lib/brevo";
 
 export async function POST(request: Request) {
   if (!isAllowedOrigin(request)) {
@@ -31,17 +27,18 @@ export async function POST(request: Request) {
     if (!validEmail(email)) {
       return NextResponse.json({ message: "Enter a valid work email." }, { status: 400 });
     }
-    const resend = getResend();
     const { from, replyTo, recipient } = getEmailConfig();
-    const [ownerDelivery, welcomeDelivery] = await Promise.all([
-      resend.emails.send({
+    await subscribeNewsletter(email, firstName);
+
+    const [ownerDelivery, welcomeDelivery] = await Promise.allSettled([
+      sendEmail({
         from,
         to: [recipient],
         replyTo: email,
-        subject: `New Field Notes subscriber${firstName ? ` — ${firstName}` : ""}`,
+        subject: firstName ? "New Field Notes subscriber — " + firstName : "New Field Notes subscriber",
         html: newsletterOwnerEmail(email, firstName),
       }),
-      resend.emails.send({
+      sendEmail({
         from,
         to: [email],
         replyTo,
@@ -49,33 +46,16 @@ export async function POST(request: Request) {
         html: newsletterWelcomeEmail(firstName),
       }),
     ]);
-    if (ownerDelivery.error) throw new Error(ownerDelivery.error.message);
-    if (welcomeDelivery.error) {
-      console.warn("Newsletter welcome delivery skipped", welcomeDelivery.error.message);
+    if (ownerDelivery.status === "rejected") {
+      console.warn("Newsletter owner notification failed", ownerDelivery.reason);
     }
-
-    let existing = false;
-    try {
-      const segmentId = await getNewsletterSegmentId(resend);
-      const created = await resend.contacts.create({
-        email,
-        firstName: firstName || undefined,
-        unsubscribed: false,
-        segments: [{ id: segmentId }],
-      });
-      if (created.error) {
-        existing = true;
-        const added = await resend.contacts.segments.add({ email, segmentId });
-        if (added.error) console.warn("Newsletter contact sync skipped", added.error.message);
-      }
-    } catch (syncError) {
-      console.warn("Newsletter contact sync skipped", syncError);
+    if (welcomeDelivery.status === "rejected") {
+      console.warn("Newsletter welcome delivery failed", welcomeDelivery.reason);
     }
 
     return NextResponse.json({
       ok: true,
-      existing,
-      welcomeSent: !welcomeDelivery.error,
+      welcomeSent: welcomeDelivery.status === "fulfilled",
     });
   } catch (error) {
     console.error("Newsletter subscription failed", error);

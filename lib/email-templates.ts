@@ -109,7 +109,7 @@ export function broadcastEmail(input: {
 <h1 style="margin:14px 0 18px;font-size:38px;line-height:1.04;letter-spacing:-1.8px">${escapeHtml(input.title)}</h1>
 <p style="margin:0;color:${muted};font-size:16px;line-height:1.7">${escapeHtml(input.excerpt)}</p>
 <a href="${escapeHtml(input.url)}" style="display:inline-block;margin-top:28px;padding:14px 20px;background:${orange};border-radius:999px;color:white;font-size:13px;font-weight:750;text-decoration:none">Read the field note →</a>
-<p style="margin:34px 0 0;color:${muted};font-size:11px;line-height:1.6">You receive Field Notes because you subscribed on stackorcs.com. <a href="{{{RESEND_UNSUBSCRIBE_URL}}}" style="color:${orange}">Unsubscribe</a>.</p>`,
+<p style="margin:34px 0 0;color:${muted};font-size:11px;line-height:1.6">You receive Field Notes because you subscribed on stackorcs.com. <a href="{{ unsubscribe }}" style="color:${orange}">Unsubscribe</a>.</p>`,
     input.title,
   );
 }
